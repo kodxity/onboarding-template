@@ -52,6 +52,7 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
   const double* __restrict__ prev_grid = old_grid.data();
   double* __restrict__ curr_grid = new_grid.data();
 
+  #pragma omp parallel for schedule(static)
   for (std::size_t i = 1; i < rows-1; i++) {
     const double* __restrict__ prev_row = prev_grid+(i-1)*cols;
     const double* __restrict__ curr_row = prev_grid+i*cols;
@@ -72,3 +73,4 @@ void apply_stencil(const Grid& old_grid, Grid& new_grid) {
     curr_grid[i*cols+cols-1] = prev_grid[i*cols+cols-1];
   }
 }
+
