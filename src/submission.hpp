@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <immintrin.h>
 #include <limits>
 #include <new>
 #include <type_traits>
@@ -82,6 +83,9 @@ void apply_stencil(const Grid &old_grid, Grid &new_grid) {
     const double *__restrict__ prev_grid = old_grid.data();
     double *__restrict__ curr_grid = new_grid.data();
 
+    const __m256d half = _mm256_set1_pd(0.5);
+    const __m256d eighth = _mm256_set1_pd(0.125);
+
 #pragma omp parallel for schedule(static)
     for (std::size_t i = 1; i < rows - 1; i++) {
         const double *__restrict__ prev_row = prev_grid + (i - 1) * stride;
@@ -89,11 +93,32 @@ void apply_stencil(const Grid &old_grid, Grid &new_grid) {
         const double *__restrict__ next_row = prev_grid + (i + 1) * stride;
         double *__restrict__ res = curr_grid + i * stride;
 
-#pragma omp simd
-        for (std::size_t j = 1; j < cols - 1; j++) {
+        std::size_t j = 1;
+
+        // Keep the first three interior cells scalar so j=4 is aligned.
+        for (; j < 4 && j < cols - 1; ++j) {
             res[j] = 0.5 * curr_row[j] +
-                     0.125 * (prev_row[j] + next_row[j] + curr_row[j - 1] +
-                              curr_row[j + 1]);
+                     0.125 * (prev_row[j] + next_row[j] +
+                              curr_row[j - 1] + curr_row[j + 1]);
+        }
+
+        for (; j + 4 <= cols - 1; j += 4) {
+            const __m256d center = _mm256_loadu_pd(curr_row + j);
+            const __m256d vertical = _mm256_add_pd(
+                _mm256_loadu_pd(prev_row + j), _mm256_loadu_pd(next_row + j));
+            const __m256d horizontal = _mm256_add_pd(
+                _mm256_loadu_pd(curr_row + j - 1),
+                _mm256_loadu_pd(curr_row + j + 1));
+            const __m256d result = _mm256_fmadd_pd(
+                _mm256_add_pd(vertical, horizontal), eighth,
+                _mm256_mul_pd(center, half));
+            _mm256_store_pd(res + j, result);
+        }
+
+        for (; j < cols - 1; ++j) {
+            res[j] = 0.5 * curr_row[j] +
+                     0.125 * (prev_row[j] + next_row[j] +
+                              curr_row[j - 1] + curr_row[j + 1]);
         }
     }
 
