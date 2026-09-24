@@ -102,17 +102,36 @@ void apply_stencil(const Grid &old_grid, Grid &new_grid) {
                               curr_row[j - 1] + curr_row[j + 1]);
         }
 
-        for (; j + 4 <= cols - 1; j += 4) {
-            const __m256d center = _mm256_loadu_pd(curr_row + j);
-            const __m256d vertical = _mm256_add_pd(
-                _mm256_loadu_pd(prev_row + j), _mm256_loadu_pd(next_row + j));
-            const __m256d horizontal = _mm256_add_pd(
-                _mm256_loadu_pd(curr_row + j - 1),
-                _mm256_loadu_pd(curr_row + j + 1));
-            const __m256d result = _mm256_fmadd_pd(
-                _mm256_add_pd(vertical, horizontal), eighth,
-                _mm256_mul_pd(center, half));
-            _mm256_store_pd(res + j, result);
+        if (j + 4 <= cols - 1) {
+            __m256d left_window = _mm256_loadu_pd(curr_row + j - 1);
+
+            for (; j + 4 <= cols - 1; j += 4) {
+                const __m256d right_window =
+                    _mm256_loadu_pd(curr_row + j + 3);
+
+                const __m256d center = _mm256_blend_pd(
+                    _mm256_permute4x64_pd(
+                        left_window, _MM_SHUFFLE(0, 3, 2, 1)),
+                    _mm256_permute4x64_pd(right_window, 0x00), 0x8);
+                const __m256d left = left_window;
+                const __m256d right = _mm256_blend_pd(
+                    _mm256_permute4x64_pd(
+                        left_window, _MM_SHUFFLE(3, 2, 3, 2)),
+                    _mm256_permute4x64_pd(
+                        right_window, _MM_SHUFFLE(1, 0, 1, 0)),
+                    0xc);
+
+                const __m256d vertical = _mm256_add_pd(
+                    _mm256_loadu_pd(prev_row + j),
+                    _mm256_loadu_pd(next_row + j));
+                const __m256d horizontal = _mm256_add_pd(left, right);
+                const __m256d result = _mm256_fmadd_pd(
+                    _mm256_add_pd(vertical, horizontal), eighth,
+                    _mm256_mul_pd(center, half));
+
+                _mm256_store_pd(res + j, result);
+                left_window = right_window;
+            }
         }
 
         for (; j < cols - 1; ++j) {
