@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstring>
 #include <immintrin.h>
 #include <limits>
 #include <new>
@@ -75,6 +76,29 @@ class Grid {
     std::size_t stride() const { return stride_; }
 };
 
+inline void copy_boundaries(const Grid &old_grid, Grid &new_grid) {
+    const std::size_t rows = old_grid.rows();
+    const std::size_t cols = old_grid.cols();
+    if (rows == 0 || cols == 0)
+        return;
+
+    const std::size_t stride = old_grid.stride();
+    const double *old_data = old_grid.data();
+    double *new_data = new_grid.data();
+
+    std::memcpy(new_data, old_data, cols * sizeof(double));
+    if (rows > 1) {
+        std::memcpy(new_data + (rows - 1) * stride,
+                    old_data + (rows - 1) * stride, cols * sizeof(double));
+    }
+
+    for (std::size_t i = 1; i + 1 < rows; ++i) {
+        new_data[i * stride] = old_data[i * stride];
+        new_data[i * stride + cols - 1] =
+            old_data[i * stride + cols - 1];
+    }
+}
+
 void apply_stencil(const Grid &old_grid, Grid &new_grid) {
     const std::size_t rows = old_grid.rows();
     const std::size_t cols = old_grid.cols();
@@ -82,6 +106,10 @@ void apply_stencil(const Grid &old_grid, Grid &new_grid) {
 
     const double *__restrict__ prev_grid = old_grid.data();
     double *__restrict__ curr_grid = new_grid.data();
+
+    copy_boundaries(old_grid, new_grid);
+    if (rows < 3 || cols < 3)
+        return;
 
     const __m256d half = _mm256_set1_pd(0.5);
     const __m256d eighth = _mm256_set1_pd(0.125);
@@ -139,17 +167,5 @@ void apply_stencil(const Grid &old_grid, Grid &new_grid) {
                      0.125 * (prev_row[j] + next_row[j] +
                               curr_row[j - 1] + curr_row[j + 1]);
         }
-    }
-
-    for (std::size_t j = 0; j < cols; j++) {
-        curr_grid[j] = prev_grid[j];
-        curr_grid[(rows - 1) * stride + j] =
-            prev_grid[(rows - 1) * stride + j];
-    }
-
-    for (std::size_t i = 0; i < rows; i++) {
-        curr_grid[i * stride] = prev_grid[i * stride];
-        curr_grid[i * stride + cols - 1] =
-            prev_grid[i * stride + cols - 1];
     }
 }
