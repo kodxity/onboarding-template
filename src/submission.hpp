@@ -107,9 +107,6 @@ class Grid {
 inline void compute_interior(ConstGridView old_view, GridView new_view) {
     const std::size_t rows = old_view.dim.rows;
     const std::size_t cols = old_view.dim.cols;
-
-    if (rows < 3 || cols < 3) return;
-
     const double* __restrict__ old_data = old_view.cells;
     double* __restrict__ new_data = new_view.cells;
     const std::size_t old_stride = old_view.stride;
@@ -121,12 +118,14 @@ inline void compute_interior(ConstGridView old_view, GridView new_view) {
         const double* old_above = old_row - old_stride;
         const double* old_below = old_row + old_stride;
         double* new_row = new_data + i * new_stride;
+
+        new_row[0] = old_row[0];
+        new_row[cols - 1] = old_row[cols - 1];
 #pragma omp simd
         for (std::size_t j = 1; j < cols - 1; j++) {
             new_row[j] =
-                0.5 * old_row[j] +
-                0.125 * (old_above[j] + old_below[j] +
-                         old_row[j - 1] + old_row[j + 1]);
+                0.5 * old_row[j] + 0.125 * (old_above[j] + old_below[j] +
+                                            old_row[j - 1] + old_row[j + 1]);
         }
     }
 }
@@ -143,24 +142,19 @@ inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
     const GridView new_view = new_grid.view();
     const std::size_t rows = old_view.dim.rows;
     const std::size_t cols = old_view.dim.cols;
+
     if (rows == 0 || cols == 0) return;
 
+    if (rows < 3 || cols < 3) {
+        for (std::size_t i = 0; i < rows; ++i) {
+            std::copy_n(old_view.cells + i * old_view.stride, cols,
+                        new_view.cells + i * new_view.stride);
+        }
+        return;
+    }
+
+    std::copy_n(old_view.cells, cols, new_view.cells);
+    std::copy_n(old_view.cells + (rows - 1) * old_view.stride, cols,
+                new_view.cells + (rows - 1) * new_view.stride);
     compute_interior(old_view, new_view);
-
-    const double* old_data = old_view.cells;
-    double* new_data = new_view.cells;
-    const std::size_t old_stride = old_view.stride;
-    const std::size_t new_stride = new_view.stride;
-
-    for (std::size_t j = 0; j < cols; j++) {
-        new_data[j] = old_data[j];
-        new_data[(rows - 1) * new_stride + j] =
-            old_data[(rows - 1) * old_stride + j];
-    }
-
-    for (std::size_t i = 0; i < rows; i++) {
-        new_data[i * new_stride] = old_data[i * old_stride];
-        new_data[i * new_stride + cols - 1] =
-            old_data[i * old_stride + cols - 1];
-    }
 }
