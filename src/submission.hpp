@@ -1,8 +1,12 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <vector>
+#include <cstdlib>
+#include <limits>
+#include <new>
+#include <stdexcept>
 
 struct Dim {
     std::size_t rows;
@@ -34,18 +38,57 @@ using ConstGridView = View<const double>;
 // everything else is yours.
 class Grid {
    private:
+    static constexpr std::size_t alignVal = 64;
+
+    static std::size_t calc_stride(std::size_t cols) {
+        static_assert(alignVal % sizeof(double) == 0);
+        constexpr std::size_t width = alignVal / sizeof(double);
+        if (cols > std::numeric_limits<std::size_t>::max() - (width - 1)) {
+            throw std::length_error("width too large for stride");
+        }
+        return ((cols + width - 1) / width) * width;
+    }
+
+    static std::size_t storage_size(std::size_t rows, std::size_t stride) {
+        if (stride != 0 &&
+            rows > std::numeric_limits<std::size_t>::max() / stride) {
+            throw std::length_error("exceeded maximum storage size");
+        }
+        const std::size_t count = rows * stride;
+        if (count > std::numeric_limits<std::size_t>::max() / sizeof(double)) {
+            throw std::length_error("exceeded maximum storage size");
+        }
+        return count;
+    }
+
     Dim dim_;
     std::size_t stride_;
-    std::vector<double> data_;
+    double* data_;
 
    public:
     Grid(std::size_t rows, std::size_t cols)
-        : dim_{rows, cols}, stride_(cols), data_(rows * stride_) {}
+        : dim_{rows, cols}, stride_(calc_stride(cols)), data_(nullptr) {
+        const std::size_t count = storage_size(rows, stride_);
+        if (count == 0) return;
+
+        data_ = static_cast<double*>(
+            std::aligned_alloc(alignVal, count * sizeof(double)));
+
+        if (data_ == nullptr) throw std::bad_alloc();
+        std::fill_n(data_, count, 0.0);
+    }
+
+    Grid(const Grid&) = delete;
+    Grid& operator=(const Grid&) = delete;
+
+    ~Grid() { std::free(data_); }
 
     double& operator()(std::size_t i, std::size_t j) {
+        assert(i < dim_.rows && j < dim_.cols);
         return data_[i * stride_ + j];
     }
     double operator()(std::size_t i, std::size_t j) const {
+        assert(i < dim_.rows && j < dim_.cols);
         return data_[i * stride_ + j];
     }
 
@@ -54,11 +97,11 @@ class Grid {
     std::size_t cols() const { return dim_.cols; }
     std::size_t stride() const { return stride_; }
 
-    double* data() { return data_.data(); }
-    const double* data() const { return data_.data(); }
+    double* data() { return data_; }
+    const double* data() const { return data_; }
 
-    GridView view() { return {data_.data(), dim_, stride_}; }
-    ConstGridView view() const { return {data_.data(), dim_, stride_}; }
+    GridView view() { return {data_, dim_, stride_}; }
+    ConstGridView view() const { return {data_, dim_, stride_}; }
 };
 
 inline void solve(ConstGridView old_view, GridView new_view) {
