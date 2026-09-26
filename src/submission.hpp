@@ -104,11 +104,11 @@ class Grid {
     ConstGridView view() const { return {data_, dim_, stride_}; }
 };
 
-inline void solve(ConstGridView old_view, GridView new_view) {
+inline void compute_interior(ConstGridView old_view, GridView new_view) {
     const std::size_t rows = old_view.dim.rows;
     const std::size_t cols = old_view.dim.cols;
 
-    if (rows == 0 || cols == 0) return;
+    if (rows < 3 || cols < 3) return;
 
     const double* __restrict__ old_data = old_view.cells;
     double* __restrict__ new_data = new_view.cells;
@@ -117,17 +117,40 @@ inline void solve(ConstGridView old_view, GridView new_view) {
 
 #pragma omp parallel for schedule(static)
     for (std::size_t i = 1; i < rows - 1; i++) {
+        const double* old_row = old_data + i * old_stride;
+        const double* old_above = old_row - old_stride;
+        const double* old_below = old_row + old_stride;
+        double* new_row = new_data + i * new_stride;
 #pragma omp simd
         for (std::size_t j = 1; j < cols - 1; j++) {
-            const std::size_t old_index = i * old_stride + j;
-            const std::size_t new_index = i * new_stride + j;
-            new_data[new_index] =
-                0.5 * old_data[old_index] +
-                0.125 * (old_data[old_index - old_stride] +
-                         old_data[old_index + old_stride] +
-                         old_data[old_index - 1] + old_data[old_index + 1]);
+            new_row[j] =
+                0.5 * old_row[j] +
+                0.125 * (old_above[j] + old_below[j] +
+                         old_row[j - 1] + old_row[j + 1]);
         }
     }
+}
+
+// Apply the five-point stencil over all interior points, copying the boundary
+// values unchanged from old_grid to new_grid. Implement your solution here.
+inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
+    assert(&old_grid != &new_grid &&
+           "old_grid and new_grid must not share the same memory");
+    assert(old_grid.dim() == new_grid.dim() &&
+           "old_grid and new_grid must have the same dimensions");
+
+    const ConstGridView old_view = old_grid.view();
+    const GridView new_view = new_grid.view();
+    const std::size_t rows = old_view.dim.rows;
+    const std::size_t cols = old_view.dim.cols;
+    if (rows == 0 || cols == 0) return;
+
+    compute_interior(old_view, new_view);
+
+    const double* old_data = old_view.cells;
+    double* new_data = new_view.cells;
+    const std::size_t old_stride = old_view.stride;
+    const std::size_t new_stride = new_view.stride;
 
     for (std::size_t j = 0; j < cols; j++) {
         new_data[j] = old_data[j];
@@ -140,15 +163,4 @@ inline void solve(ConstGridView old_view, GridView new_view) {
         new_data[i * new_stride + cols - 1] =
             old_data[i * old_stride + cols - 1];
     }
-}
-
-// Apply the five-point stencil over all interior points, copying the boundary
-// values unchanged from old_grid to new_grid. Implement your solution here.
-inline void apply_stencil(const Grid& old_grid, Grid& new_grid) {
-    assert(&old_grid != &new_grid &&
-           "old_grid and new_grid must not share the same memory");
-    assert(old_grid.dim() == new_grid.dim() &&
-           "old_grid and new_grid must have the same dimensions");
-
-    solve(old_grid.view(), new_grid.view());
 }
